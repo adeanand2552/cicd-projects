@@ -1,0 +1,138 @@
+SpringBoot Application:
+Ec2 > t2.large > sg-alltraffic
+
+Local-Test
+--------------
+sudo apt update -y
+git clone https://github.com/adeanand2552/springboot-project.git
+cd springboot-project
+sudo apt install maven -y
+mvn clean package
+
+docker build .
+docker images
+docker run -d -p 8010:8080 <cid>
+docker ps
+open port 8010 ant then pubIP:8010
+
+########################################################################
+
+CD-part
+--------
+InstallDocker
+
+Install Sonarqube as container : access sonarqube > get Token
+
+install jenkins > access jenkins
+sudo usermod -aG docker jenkins
+
+Plugins:
+1.Docker pipeline
+2.SonarQuber Scanner
+
+Tools:
+1.SonarQuber Scanner
+
+Credentials:
+1.sonarqube token as secretText
+2.dockerhub username-password
+3.github token as secretText
+
+Pipelinescrpit
+
+After Successfull Build: 
+dockerimage pushed DockerHUB
+docker images 
+we can run it as a container and access our App
+for Auto Deployment CD-part we integrate with argoCD
+
+sonarqube new project
+github deployment.yml updates with newly build image
+
+###############################################################
+
+CD-part:
+---------
+We use argoCD to deploy app automatically on to k8s
+
+use windows to run minikube cluster
+install argocd using operator
+argoCD Operator documentation >  Usage > Basics > copy the first example
+vim argo.yml
+kubectl apply -f argo.yml		>creates argoCD controller
+kubectl get pods 
+kubectl get svc
+kubectl edit svc  example-argocd-server
+change Type from clusterIP to NodePort
+kubectl get svc
+minikube service argocd-server
+minukube service list
+after all the PODs up and running 1/1 
+we can access the generated links
+
+username:admin , pass:
+kubectl get secret 
+kubectl edit secret example-argocd-cluster
+admin.Passwd > copy : they are encrypted
+
+echo <pass> | base64 -d > use this pass for argoCD exclude % symbol
+
+
+in ardoCD :
+create app> appname,projname,SYNC:auto,RepoURL:,path:deployment file path in REPO > clusterURL:select,namespace:default >create
+wait for updates
+
+check parelally from cmd
+kubectl get pods
+kubectl get deploy
+
+
+kubectl edit deploy spring-boot-app  >  modify imagename 
+
+argo cd will tell us the error(in diff Tab) it will auto correct it
+
+
+
+
+
+
+
+
+
+
+
+Troubleshoot:
+-------------
+sudo usermod -aG docker jenkins  : must
+restart jenkins after installing any plugin
+if you restart docker run all the container again
+
+
+dockerContainer as jenkins-Agent
+>Less Config
+>if we use Ec2 as agent : eventhough there is no change in source code the instance need to be running > cost
+use docker+maven installed image from dockerHUB
+
+pom.xml for java based app : same as  requirement.txt for python based app
+all the dependencies require to run the app
+maven read the pom.xml > download all the packages & dependencies to build the java app
+artifacts(jar/war) will be saved in target folder
+use this in Docker file  > dokcer executes this
+
+adduser
+>high-level command designed for ease of use
+>more user-friendly and interactive
+>prompts for additional info about the user being added,such as full name, phone number
+>automatically creates a home-dir for the user and sets up default configurations
+ such as creating a group with the same name as the user and adding the user to it
+
+useradd:
+>low-level command that directly adds a new user to the system
+>requires additional options to specify parameters such as the user's home-dir, login shell, and primary group
+>does not create a home directory by default unless explicitly specified with the -m option
+>does not set up default configurations 
+
+
+
+
+
