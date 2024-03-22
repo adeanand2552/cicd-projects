@@ -1,0 +1,513 @@
+Netflix CLone CI/CD with Monitoring
+Architucture:
+=>Deploying App Locally on Docker container > integrate Security using SonarQube&Trivy
+=>Automate CICD using jenkins : automate creation of DockerImage
+=>secured using sonarQube&Trivy and uploaded on DockerHUB > integrate Promethius&grafana to monitor, get notified on email using SMTP
+=>deploy app on k8s using argoCD(gitOPS tool) > monitoring on k8s using HelmCharts
+=>DEV | SEC | OPS
+
+-------------------------------------------------------------------------
+Resources:
+https://www.youtube.com/watch?v=g8X5AoqCJHc
+https://www.youtube.com/watch?v=pbGA-B_SCVk
+https://mrcloudbook.com/netflix-clone-ci-cd-with-monitoring-email-devsecops
+https://github.com/adeanand2552/DevSecOps-Project
+tmdb->The-Movie-DataBase : get API to fetch all the movies https://www.themoviedb.org/
+My key: 00f2f9873ead4cc182071fef554ecf22
+MY API Read Access Token:Mke it as single line and use
+eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIwMGYyZjk4NzNlYWQ0Y2MxODIwNzFmZWY1NTRlY2YyMiIsInN1YiI6IjY1ZmFiZDZlYmYzMWY
+yMDE3ZWZkOTlkYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.2C0MlPpi8X_h6evvHphZQgWB5eF9l3Qh_0hEzlKhcQ0
+
+Plugins:					Tool COnfig:		System:			Credentials:
+1.Eclipse Temurin Installer			1.JDK			1.SQ Server		1.SQ Token as Secure text
+2.NodeJs Plugin					2.NodeJS		2.Prometheus		2.DockerHUB username&pass
+3.SonarQube Scanner				3.SonarQ Scanner	3.Email notif		3.gmail-appPass
+4.OWASP-Dependency-check			4.Dependency-Check
+5.Docker,DockerCommons,DockerPipeline		5.Docker
+  DockerAPI,docker-build-setup		
+6.Prometheus metrics
+7.Email Extension Template
+
+Netflix-jen Ec2:		Prometheus Ec2:
+8081 - Docker image run		9090 - prometheus
+8080 - jenkins			9100 - Nodeexporter
+9000 - sonarQube		3000 - Grafana
+
+for Practice Open All traffic 
+
+-----------------------------------------------------------------------------
+
+Part1-DEV: Testing the APP localyy
+---------------------------------
+Ec2 > t2.large > allow SSH,HTTPS,HTTP > 25Gib-gp2 Storage 
+lengthy-Proj > Attach an Elastic IP > netflix-EIP > associate to above Ec2
+
+sudo apt update -y
+git clone https://github.com/adeanand2552/DevSecOps-Project.git
+
+cd DevSecOps-Project
+ls > Dockerfile  : to run without docker use npm
+
+#install docker:
+sudo usermod -aG docker $USER
+sudo systemctl restart docker
+newgrp docker
+sudo chmod 777 /var/run/docker.sock
+
+docker build -t netflix .   # 16-layers Process Takes time
+docker images
+docker run -d -p 8081:80 netflix     
+open port 8081 then publicIP:8081
+
+we did not integrate any APIs to fetch movies so shows a blankpage
+tmdb->The-Movie-DataBase : get API to fetch all the movies 
+https://www.themoviedb.org/  > login > settings > API > create > Developer> accept > provide details>  copy API-key
+
+docker ps
+docker stop <containerid>
+docker rm <containerid>
+docker rmi -f netflix	
+docker build --build-arg TMDB_V3_API_KEY=<your-api-key> -t netflix .
+>creates new image > does not take much time because docker images build layerBylayer
+>now it just work on the layer thats not done so take less time
+
+docker images
+docker run -d -p 8081:80 netflix
+pubIP:8081
+Now our application is successfully running locally, DEV part is done
+
+################################################################### END of DEV
+
+Part2-SECurity
+---------------
+SonrQube : Analyze code and provide reports
+Trivy    : OpenSource security scanner-Scan and provide reports
+
+#install Trivy:
+sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+sudo wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/aquasecurity-trivy.gpg
+echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+sudo apt update
+sudo apt install trivy -y
+
+cd DevSecOps-Project > ls
+trivy fs .
+docker images
+trivy image netflix/<imageID>
+leave the vulnerabilities in Orgs we work hard on security > Now SEC-part is done
+
+#Deploy sonarQube-server as a container
+docker run -d --name sonar -p 9000:9000 sonarqube:lts-community
+docker ps
+open port 9000 and then pubIP:9000
+default username&pass : admin > update pass
+
+administration > config > webhooks > create > name:jenkins,URL:<http://jenkins-public-ip:8080>/sonarqube-webhook/
+administration > security > users > updateToken name:jenkins > generate > copy
+
+################################################################### END of SEC
+
+Part3-OPS
+----------
+we use jenkins as CICD Tool
+
+#install-java:
+#install-jenkins:
+sudo usermod -aG docker jenkins
+sudo systemctl status jenkins
+open port 8080 and then pubIP:8080
+
+jenkins configurations:
+-----------------------
+Plugins-Required:
+1.Eclipse Temurin Installer
+2.NodeJS
+3.SonarQube Scanner
+
+ConfigureTools:
+1.JDK installations > add jdk >name:jdk17,auto:adoptium,v17.0.8.1+1
+2.NodeJS inst>name:node16,auto:v16.2.0 now apply&save
+3.sonarQube Scanner insta >add name:sonar-scanner ,auto,version:leave as it is  apply&save
+
+Credentials-1 : global > secretText > secret:copied-Token >ID,descrptn:sonar-token
+System-1      : SonarQubeServers > add > name:sonar-server,URL,selectToken >apply&save
+(URL: jenkins and sonarQube on same machine we can also use localhOst:9000 but go with IP only)
+
+
+PipeLine
+--------
+newItem > name:netflix > pipeline
+Paste pipelineScript > apply&save
+
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        nodejs 'node16'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+    stages {
+        stage('clean workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main', url: 'https://github.com/adeanand2552/DevSecOps-Project.git'
+            }
+        }
+        stage("Sonarqube Analysis") {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Netflix \
+                    -Dsonar.projectKey=Netflix'''
+                }
+            }
+        }
+        stage("quality gate") {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                }
+            }
+        }
+        stage('Install Dependencies') {
+            steps {
+                sh "npm install"
+            }
+        }
+    }
+}
+
+>change gitHUB details
+>buildnow
+
+>new porject created in SonarQube
+leave everything for now
+our dependencies should also be secure and not cause any issues to our app : use jenkins OWASP Dependency check
+
+plugins:
+4.OWASP-Dependency-check
+5.Docker,DockerCommons,DockerPipeline,DockerAPI,docker-build-setup
+
+ConfigureTools:
+4.Dependency-Check inst >name:DP-Check,auto:gitHUB,vDefault
+5.Docker inst>name:docker,auto:docker.com,vLatest  > Appy&save 
+
+Credentials-2: global > usernameWithPAss > dockerHUB-username,Password,ID:dockerhub
+
+on Ec2:
+docker ps 
+docker stop netflix
+docker rm netflix
+
+stop the previous Build and update the pipelineScript 
+
+pipeline{
+    agent any
+    tools{
+        jdk 'jdk17'
+        nodejs 'node16'
+    }
+    environment {
+        SCANNER_HOME=tool 'sonar-scanner'
+    }
+    stages {
+        stage('clean workspace'){
+            steps{
+                cleanWs()
+            }
+        }
+        stage('Checkout from Git'){
+            steps{
+                git branch: 'main', url: 'https://github.com/adeanand2552/DevSecOps-Project.git'
+            }
+        }
+        stage("Sonarqube Analysis "){
+            steps{
+                withSonarQubeEnv('sonar-server') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Netflix \
+                    -Dsonar.projectKey=Netflix '''
+                }
+            }
+        }
+        stage("quality gate"){
+           steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token' 
+                }
+            } 
+        }
+        stage('Install Dependencies') {
+            steps {
+                sh "npm install"
+            }
+        }
+        stage('OWASP FS SCAN') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'dp-check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage('TRIVY FS SCAN') {
+            steps {
+                sh "trivy fs . > trivyfs.txt"
+            }
+        }
+        stage("Docker Build & Push"){
+            steps{
+                script{
+                   withDockerRegistry(credentialsId: 'dockerhub', toolName: 'docker'){ 
+                       sh "docker build --build-arg TMDB_V3_API_KEY=00f2f9873ead4cc182071fef554ecf22 -t netflix ."
+                       sh "docker tag netflix adeanand2552/netflix:latest"
+                       sh "docker push adeanand2552/netflix:latest"
+                    }
+                }
+            }
+        }
+        stage("TRIVY IMAGE SCAN"){
+            steps{
+                sh "trivy image adeanand2552/netflix:latest > trivyimage.txt" 
+            }
+        }
+        stage('Deploy to container'){
+            steps{
+                sh 'docker run -d --name netflix -p 8081:80 adeanand2552/netflix:latest'
+            }
+        }
+    }
+}  
+
+>buildnow
+in Docker file the image is EXPOSED to 80 , so -p 8081:80
+<public-ip:8081>  :to see Output
+
+If you get docker login failed Error in pipeine
+sudo su
+sudo usermod -aG docker jenkins
+sudo systemctl restart jenkins
+
+After completing all stages
+docker ps & check dockerHUB for image
+meanwhile do the next steps
+
+################################################################### END of OPS
+
+Part4-Monitoring:
+-----------------
+new Ec2 > monitoring > t2.medium(2cpu,4GB-ram,20GB-HDD requied for Prometheus Server)
+Allocate Elastic IP > name:monitoring-eip > Associate with above instance  
+sudo apt update
+
+Prometheus
+-----------
+#create a dedicated Linux user i.e systemUser for Prometheus and download Prometheus
+sudo useradd --system --no-create-home --shell /bin/false prometheus
+wget https://github.com/prometheus/prometheus/releases/download/v2.47.1/prometheus-2.47.1.linux-amd64.tar.gz
+
+#Extract Prometheus files, move them, and create directories
+tar -xvf prometheus-2.47.1.linux-amd64.tar.gz
+cd prometheus-2.47.1.linux-amd64/
+sudo mkdir -p /data /etc/prometheus
+sudo mv prometheus promtool /usr/local/bin/
+sudo mv consoles/ console_libraries/ /etc/prometheus/
+sudo mv prometheus.yml /etc/prometheus/prometheus.yml
+
+sudo service prometheus  #Error:unrecognized server
+ls -la /etc/prometheus   #ownerGroup=ubuntu
+
+sudo chown -R prometheus:prometheus /etc/prometheus/ /data/        #setOwnership
+ls -la /etc/prometheus
+sudo vim /etc/systemd/system/prometheus.service
+
+[Unit]
+Description=Prometheus
+Wants=network-online.target
+After=network-online.target
+
+StartLimitIntervalSec=500
+StartLimitBurst=5
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+Restart=on-failure
+RestartSec=5s
+ExecStart=/usr/local/bin/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/data \
+  --web.console.templates=/etc/prometheus/consoles \
+  --web.console.libraries=/etc/prometheus/console_libraries \
+  --web.listen-address=0.0.0.0:9090 \
+  --web.enable-lifecycle
+
+[Install]
+WantedBy=multi-user.target
+
+sudo systemctl enable prometheus
+sudo systemctl start prometheus
+sudo systemctl status prometheus
+
+if AnyError: journalctl -u prometheus -f --no-pager
+
+openPort-9090 and then pubIP:9090
+status > targets : only one target
+
+NodeExporter
+------------
+gathers system metrics and exposes them in a format which can be ingested by Prometheus
+collect Linux system metrics like CPU load and disk I/O & expose these as Prometheus-style metrics.
+
+#Create a system user for Node Exporter and download Node Exporter
+sudo useradd --system --no-create-home --shell /bin/false node_exporter
+wget https://github.com/prometheus/node_exporter/releases/download/v1.6.1/node_exporter-1.6.1.linux-amd64.tar.gz
+
+#Extract Node Exporter files, move the binary, and clean up
+tar -xvf node_exporter-1.6.1.linux-amd64.tar.gz
+sudo mv node_exporter-1.6.1.linux-amd64/node_exporter /usr/local/bin/
+rm -rf node_exporter*
+
+sudo vim /etc/systemd/system/node_exporter.service
+
+[Unit]
+Description=Node Exporter
+Wants=network-online.target
+After=network-online.target
+
+StartLimitIntervalSec=500
+StartLimitBurst=5
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+Restart=on-failure
+RestartSec=5s
+ExecStart=/usr/local/bin/node_exporter --collector.logind
+
+[Install]
+WantedBy=multi-user.target
+
+sudo systemctl enable node_exporter
+sudo systemctl start node_exporter
+sudo systemctl status node_exporter
+
+AnyIssues : journalctl -u node_exporter -f --no-pager
+
+Add Static Targets to Prometheus
+-------------------------------
+At this point, we have only a single target in our Prometheus
+Prometheus can dynamically discover targets in AWS, GCP, and other clouds based on the labels.
+but for now keep it simple and keep adding static targets
+To create a static target, you need to add job_name with static_configs.
+
+Configure Prometheus Plugin Integration:
+sudo vim /etc/prometheus/prometheus.yml
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['<prom-IP>:9100']
+
+Follow proper Indentation
+
+promtool check config /etc/prometheus/prometheus.yml    #to check syntax
+curl -X POST http://localhost:9090/-/reload		#reload config
+
+refresh prometheus page or http://<ip>:9090/targets > updated targets 
+open port-9100 and click on links for metrics.
+
+if targets are not UP systemctl enable>start <target>
+
+Grafana:
+---------
+To visualize metrics we can use Grafana.
+There are many different data sources that Grafana supports, one of them is Prometheus
+
+#Install Dependencies
+sudo apt-get update
+sudo apt-get install -y apt-transport-https software-properties-common
+#Add the GPG key for Grafana
+wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -   #it should returns OK
+#Add Grafana Repository
+echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+#update&install
+sudo apt-get update
+sudo apt-get -y install grafana
+ 
+sudo systemctl enable grafana-server
+sudo systemctl start grafana-server
+sudo systemctl status grafana-server
+
+open-3000 and then pubIP:3000
+default username&pass: admin > update pass/skip
+
+To visualize metrics, you need to add a data source
+datasources > Prometheus > promURL(http://pubIP:9090) >save&test
+
+1.Dashboads > + > import-dashboard > paste ID-1860 & load > select prometheus > import
+search: node exporter grafana dashboard > open DOc > CopyID
+
+
+Adding jenkins to Prom&Grafana:
+plugins :
+6.Prometheus metrics : asks for restart and ready with jenkins-pass
+System-2: Prometheus > keep everything default > apply&save
+
+sudo vim /etc/prometheus/prometheus.yml
+
+  - job_name: 'jenkins'
+    metrics_path: '/prometheus'
+    static_configs:
+      - targets: ['<jenkins-ip>:8000']
+
+promtool check config /etc/prometheus/prometheus.yml    #to check syntax
+curl -X POST http://localhost:9090/-/reload		#reload config
+refresh prometheus page or http://<ip>:9090/targets > updated targets
+
+2.Dashboard > + > import dashboard > ID-9964 &load > select prometheus >import
+search: jenkins grafana dashboard > open DOc > CopyID
+
+now jenkinsPipeline> buildnow > reflects the changes in grafana
+
+################################################################### END of Monitoring
+
+part-5 Email notifications
+--------------------------------
+gmail > manageAcc > security: 2-factorAuth enabled
+search for app password > Appname:jenkins > generate
+
+jenkins
+Plugins  : 7.Email Extension Template
+System-3 :  
+Extended email notif > Server:smtp.gmail.com, port465, adv:select-cred,use SSL,defcontentType:HTML,dTriggers:Always,failureAny > apply
+Email notif > Server: smtp.gmail.com  > adv : use SMTP-Auth>email,Apppass > use SSL,port465 Test > apply&save
+Credentials-3 : add username&AppPass
+
+Add after stage Block
+
+post {
+     always {
+        emailext attachLog: true,
+            subject: "'${currentBuild.result}'",
+            body: "Project: ${env.JOB_NAME}<br/>" +
+                "Build Number: ${env.BUILD_NUMBER}<br/>" +
+                "URL: ${env.BUILD_URL}<br/>",
+            to: 'adeanand2255@gmail.com',  			
+            attachmentsPattern: 'trivyfs.txt,trivyimage.txt'
+        }
+    }
+
+buildnow
+
+################################################################### END of EmailNotify
+
+part-6 Kubernetes
+----------------
+
+Commenst:
+1.for DEV part : testing the app locally we can use t2.micro also
+
